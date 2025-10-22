@@ -45,10 +45,6 @@ O sistema opera de forma síncrona: o cliente espera a conclusão do processamen
 5. **Luiz Henrique Costa Rezende**
 6. **Vini Schurraus**
 
-***
-*(Na apresentação final, inclua uma imagem simples deste fluxo!)*
-***
-
 ### 5. Configuração e Instalação
 
 #### A. Pré-requisitos
