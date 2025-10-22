@@ -9,7 +9,7 @@ const { GoogleGenAI } = require('@google/genai');
 const pdf = require('pdfkit'); 
 const { v4: uuidv4 } = require('uuid'); 
 const { Pool } = require('pg'); 
-const fs = require('fs'); // Importação essencial para verificar e carregar a logo
+const fs = require('fs'); 
 
 // --- Variáveis de Ambiente e Instâncias ---
 const app = express();
@@ -46,6 +46,8 @@ pool.connect((err, client, release) => {
 // --- MIDDLEWARES ---
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+// Servir a raiz do projeto para o Front-end poder acessar a logo
+app.use(express.static(__dirname)); 
 
 
 // --- FUNÇÃO CENTRAL: INTEGRAÇÃO COM A IA ---
@@ -56,11 +58,11 @@ async function gerarRelatorioIA(dadosUsuario) {
 Use títulos de Markdown (##) para as seções e listas com bullet points (-) para os itens. Mantenha um tom motivacional e profissional.
 
 ## Análise (Pontos Fortes e de Atenção)
-- Resumo do perfil atual.
+- Resumo do perfil atual, sem usar parênteses desnecessários.
 - Destaque o impacto do sono, estresse e exercício na produtividade.
 
 ## Recomendações Personalizadas
-- 3 a 5 sugestões práticas e específicas baseadas nos dados fornecidos (Ex: Se dorme pouco e está estressado, sugira meditação antes de dormir).
+- 3 a 5 sugestões práticas e específicas baseadas nos dados fornecidos.
 
 ## Plano de Ação de 7 Dias (3 metas SMART)
 - Crie 3 metas de curto prazo (7 dias) que sejam Específicas, Mensuráveis, Alcançáveis, Relevantes e Temporais.
@@ -128,7 +130,7 @@ app.post('/api/analisar', async (req, res) => {
 });
 
 
-// ROTA 2: GET /api/download-pdf/:id (Geração do PDF com Layout CORRIGIDO e LOGO CENTRALIZADA/MAIOR)
+// ROTA 2: GET /api/download-pdf/:id (Geração do PDF ORGANIZADO)
 app.get('/api/download-pdf/:id', async (req, res) => {
     const id = req.params.id;
     let client;
@@ -144,62 +146,71 @@ app.get('/api/download-pdf/:id', async (req, res) => {
 
         const registro = result.rows[0];
         const dados = registro.dados_formulario;
-        const relatorioTexto = registro.relatorio_ia;
+        let relatorioTexto = registro.relatorio_ia; // Usamos 'let' para manipular o texto
 
-        // 2. Cria o documento PDF (pdfkit)
-        const doc = new pdf({ size: 'A4', margin: 50 });
+        // 2. Pré-processamento do Texto da IA (Remover Markdown indesejado)
+        // Remove asteriscos duplos (negrito de markdown) para evitar poluição visual no texto corrido
+        relatorioTexto = relatorioTexto.replace(/\*\*/g, ''); 
+        
+        // 3. Cria o documento PDF (pdfkit)
+        // Aumenta o lineGap (espaçamento entre linhas) para maior clareza.
+        const doc = new pdf({ size: 'A4', margin: 50, lineGap: 3 }); 
 
         const nomeArquivo = `Relatorio_BemEstar_${dados.nome.replace(/\s/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`;
         
-        // Configura o cabeçalho para download
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
 
         doc.pipe(res); 
 
-        // --- LAYOUT DO PDF CORRIGIDO: LOGO CENTRALIZADA E MAIOR, SEM TEXTO REPETIDO ---
+        // --- LAYOUT DO PDF ORGANIZADO ---
         
-        // Caminho da Logo (Assumindo que está na RAIZ, conforme seu print)
         const logoPath = path.join(__dirname, 'logo.png'); 
-        const logoWidth = 120; // Largura da logo em pixels
-        const logoHeight = 120; // Altura da logo em pixels
-        const pageCenterX = doc.page.width / 2; // Centro da página
+        const logoWidth = 120;
+        const logoHeight = 120;
+        const pageCenterX = doc.page.width / 2;
 
+        // Adiciona a Logo (Maior e Centralizada)
         if (fs.existsSync(logoPath)) { 
-            doc.image(logoPath, pageCenterX - (logoWidth / 2), 50, { // Centraliza a logo na largura
+            doc.image(logoPath, pageCenterX - (logoWidth / 2), 50, { 
                 fit: [logoWidth, logoHeight], 
                 align: 'center'
             });
             // MOVE O PONTO DE INSERÇÃO DO TEXTO para ABAIXO da logo centralizada
-            doc.y = 50 + logoHeight + 20; // 50 (margem superior) + altura da logo + margem extra
+            doc.y = 50 + logoHeight + 25; // 25: Espaçamento extra
         } else {
-            // Se a logo não for encontrada, o texto começa no topo
             doc.y = 50; 
             console.warn(`[PDF] Aviso: LOGO NÃO ENCONTRADA. Caminho tentado: ${logoPath}.`);
         }
 
-        // Informações da Análise (abaixo da logo, alinhado à esquerda ou centro)
+        // Informações da Análise
         doc.fontSize(12).fillColor('black').text(`Análise para: ${dados.nome}`, { align: 'center' });
-        doc.fontSize(10).text(`Data da Análise: ${new Date(registro.data_analise).toLocaleDateString()}`, { align: 'center' }).moveDown(1);
+        doc.fontSize(10).text(`Data da Análise: ${new Date(registro.data_analise).toLocaleDateString()}`, { align: 'center' }).moveDown(1.5); // Move para baixo para dar espaço
         
         doc.lineWidth(1).strokeColor('#ccc').moveTo(50, doc.y).lineTo(550, doc.y).stroke().moveDown(1); 
         
-        // Processamento do texto da IA
+        // Processamento do texto da IA (Parágrafos e Títulos)
         const linhas = relatorioTexto.split('\n');
         doc.fillColor('black');
 
         linhas.forEach(line => {
             if (line.startsWith('## ')) {
-                // Título de Seção (##)
-                doc.moveDown(0.7).fontSize(16).fillColor('#007bff').text(line.substring(3).toUpperCase(), { 
+                // Título de Seção (##) - Grande espaço antes e depois do título
+                doc.moveDown(1).fontSize(16).fillColor('#007bff').text(line.substring(3).toUpperCase(), { 
                     underline: true 
-                }).fillColor('black').moveDown(0.3);
+                }).fillColor('black').moveDown(0.7);
             } else if (line.startsWith('- ')) {
-                // Item de Lista (-)
-                doc.fontSize(10).text(line, { indent: 20, listType: 'bullet' });
+                // Item de Lista (-) - Usa o listType do pdfkit (melhor formatação)
+                doc.fontSize(10).text(line.substring(2).trim(), { 
+                    indent: 20, 
+                    listType: 'bullet', 
+                    lineGap: 1 // Espaçamento menor para a lista, mais junto
+                });
+                doc.moveDown(0.2); // Pequeno espaço após o item da lista
             } else if (line.trim().length > 0) {
-                // Parágrafo normal
-                doc.fontSize(10).text(line.trim(), { align: 'justify' }).moveDown(0.2);
+                // Parágrafo normal - Maior espaço entre parágrafos
+                doc.fontSize(10).text(line.trim(), { align: 'justify', lineGap: 5 }); 
+                doc.moveDown(0.5); // Espaço extra após parágrafo
             }
         });
         
